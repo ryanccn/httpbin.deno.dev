@@ -1,0 +1,25 @@
+Welcome to httpbin.deno.dev!
+============================
+
+This is a basic port of `httpbin` to Deno.
+
+Here are some endpoints that you can test out:
+
+- /get
+- /post
+- /patch
+- /put
+- /delete
+
+- /auth/basic/:username/:password
+- /auth/bearer
+
+- /status/:code
+
+- /ip
+- /user-agent
+- /headers
+
+- /redirect?url=SOME_URL
+
+Have fun!

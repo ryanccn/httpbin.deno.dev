@@ -1,8 +1,20 @@
 import { Application, Router } from 'https://deno.land/x/oak@v10.2.0/mod.ts';
+import {
+  dirname,
+  fromFileUrl,
+} from 'https://deno.land/std@0.123.0/path/mod.ts';
+
 import { basicInfo, bodyInfo, toObject } from './info.ts';
 
 const app = new Application();
 const router = new Router();
+
+router.get('/', async (ctx) => {
+  await ctx.send({
+    path: './index.txt',
+    root: dirname(fromFileUrl(import.meta.url)),
+  });
+});
 
 router.get('/get', (ctx) => {
   ctx.response.body = basicInfo(ctx.request);
