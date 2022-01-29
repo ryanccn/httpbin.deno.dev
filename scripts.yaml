@@ -1,0 +1,7 @@
+scripts:
+  dev:
+    desc: start up the dev server
+    cmd: deno run -A --watch mod.ts
+  lint:
+    desc: lint
+    cmd: deno lint mod.ts
