@@ -20,6 +20,6 @@ Here are some endpoints that you can test out:
 - /user-agent
 - /headers
 
-- /redirect?url=SOME_URL
+- /redirect?to=SOME_URL
 
 Have fun!
