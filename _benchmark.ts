@@ -1,13 +1,21 @@
-import pSeries from 'https://cdn.skypack.dev/p-series@3.0.0?dts';
+import pSeries from "https://cdn.skypack.dev/p-series@3.0.0?dts";
+import {
+  bgBlue,
+  bgGreen,
+  bgWhite,
+  blue,
+  bold,
+  green,
+} from "https://deno.land/std@0.125.0/fmt/colors.ts";
 
-const DENO_ROOT = 'https://httpbin.deno.dev';
-const CLASSIC_ROOT = 'https://pie.dev';
+const DENO_ROOT = "https://httpbin.deno.dev";
+const PYTHON_ROOT = "https://pie.dev";
 
 type BenchmarkEndpoint = string | {
   deno: string;
-  classic: string;
+  python: string;
 };
-type BenchmarkOptions = {
+interface BenchmarkOptions {
   /** The method of the `fetch` request */
   method?: string;
   /** The body to provide in the request */
@@ -17,12 +25,12 @@ type BenchmarkOptions = {
 
   /** Whether to expect an error code intentionally (such as 401s) */
   expectError?: number;
-};
-type BenchmarkResults = {
+}
+interface BenchmarkResults {
   endpoint: BenchmarkEndpoint;
   denoTime: number;
-  classicTime: number;
-};
+  pythonTime: number;
+}
 
 /** Time a request */
 const timeRequest = async (url: string, options: BenchmarkOptions) => {
@@ -43,35 +51,60 @@ const timeRequest = async (url: string, options: BenchmarkOptions) => {
   return beta - alpha;
 };
 
+const ITERATIONS = 10;
+const PROGRESS_BAR_WIDTH = 25;
+
+/** Progress bar */
+const barFactory = async (
+  opts: { url: string; i: number; type: "deno" | "python" },
+) => {
+  const filledLength = Math.floor(opts.i / ITERATIONS * PROGRESS_BAR_WIDTH);
+  const emptyLength = PROGRESS_BAR_WIDTH - filledLength;
+
+  const fg = opts.type === "deno" ? blue : green;
+  const bg = opts.type === "deno" ? bgBlue : bgGreen;
+
+  const pathname =
+    new URL(opts.url, opts.type === "deno" ? DENO_ROOT : PYTHON_ROOT).pathname;
+
+  const bar = "" +
+    "\x1B[2K\x1B[0G" +
+    "\u001b[1F\x1B[2K\x1B[0G" +
+    (opts.type === "deno" ? "🦕" : "🐍") +
+    pathname +
+    "\n" +
+    bg(fg("=").repeat(filledLength)) +
+    bgWhite(" ".repeat(emptyLength)) +
+    "  " +
+    `${opts.i}/${ITERATIONS}`;
+
+  await Deno.stdout.write(new TextEncoder().encode(bar));
+};
+
 /** Repeat an async function for many times and take the average of the numbers */
-const repeatAndAverage = async (promiseFactory: () => Promise<number>) => {
+const measure = async (
+  info: { url: string; type: "deno" | "python" },
+  promiseFactory: () => Promise<number>,
+) => {
+  let i: number = 0;
+
   const values: number[] = [];
-  const getAverage =
-    () => (values.reduce((prev, cur) => (prev + cur)) / values.length);
 
-  await Deno.stdout.write(new TextEncoder().encode('timing requests... '));
+  await barFactory({ url: info.url, i, type: info.type });
 
-  for (let _ = 1; _ <= 10; _++) {
+  for (i = 1; i <= ITERATIONS; i++) {
     values.push(await promiseFactory());
 
-    await Deno.stdout.write(
-      new TextEncoder().encode(
-        `${_ !== 1 ? '\rtiming requests... ' : ''}${
-          _ < 10 ? ' ' : ''
-        }${_} / 10 - currently ${getAverage().toFixed(2)}ms`,
-      ),
-    );
+    await barFactory({ url: info.url, i, type: info.type });
   }
 
-  await Deno.stdout.write(new TextEncoder().encode('\n'));
-
-  return getAverage();
+  return values.reduce((prev, cur) => (prev + cur)) / values.length;
 };
 
 /**
  * Benchmark an endpoint
  *
- * @param endpoint The absolute endpoint (can provide different endpoints for Deno and Classic)
+ * @param endpoint The absolute endpoint (can provide different endpoints for Deno and python)
  * @param options Options to provide for benchmarking
  */
 const benchmark = async (
@@ -79,69 +112,78 @@ const benchmark = async (
   options: BenchmarkOptions = {},
 ): Promise<BenchmarkResults> => {
   let denoEndpoint: string;
-  let classicEndpoint: string;
+  let pythonEndpoint: string;
 
-  if (typeof endpoint === 'string') {
-    denoEndpoint = classicEndpoint = endpoint;
+  if (typeof endpoint === "string") {
+    denoEndpoint = pythonEndpoint = endpoint;
   } else {
     denoEndpoint = endpoint.deno;
-    classicEndpoint = endpoint.classic;
+    pythonEndpoint = endpoint.python;
   }
 
   // const denoTime = await timeRequest(DENO_ROOT + denoEndpoint, options);
-  // const classicTime = await timeRequest(
-  //   CLASSIC_ROOT + classicEndpoint,
+  // const pythonTime = await timeRequest(
+  //   PYTHON_ROOT + pythonEndpoint,
   //   options,
   // );
-  const denoTime = await repeatAndAverage(() =>
-    timeRequest(DENO_ROOT + denoEndpoint, options)
+  const denoTime = await measure(
+    { url: denoEndpoint, type: "deno" },
+    () => timeRequest(DENO_ROOT + denoEndpoint, options),
   );
-  const classicTime = await repeatAndAverage(() =>
+  const pythonTime = await measure({
+    url: pythonEndpoint,
+    type: "python",
+  }, () =>
     timeRequest(
-      CLASSIC_ROOT + classicEndpoint,
+      PYTHON_ROOT + pythonEndpoint,
       options,
-    )
-  );
+    ));
 
-  return { endpoint, denoTime, classicTime };
+  return { endpoint, denoTime, pythonTime };
 };
 
+/**
+ * THE BENCHMARKS
+ */
+
 const basicAuthEndpoint: BenchmarkEndpoint = {
-  deno: '/auth/basic/hello/world',
-  classic: '/basic-auth/hello/world',
+  deno: "/auth/basic/hello/world",
+  python: "/basic-auth/hello/world",
 };
 
 const bearerAuthEndpoint: BenchmarkEndpoint = {
-  deno: '/auth/bearer',
-  classic: '/bearer',
+  deno: "/auth/bearer",
+  python: "/bearer",
 };
+
+await Deno.stdout.write(new TextEncoder().encode("\n"));
 
 const results = await pSeries([
   () =>
-    benchmark('/get?a=b&c=d', {
+    benchmark("/get?a=b&c=d", {
       headers: {
-        'X-Test-Header': 'ignore this header!',
+        "X-Test-Header": "ignore this header!",
       },
     }),
   () =>
-    benchmark('/post', {
-      method: 'POST',
-      body: JSON.stringify({ a: 2, b: 'here\'s a string', c: null }),
+    benchmark("/post", {
+      method: "POST",
+      body: JSON.stringify({ a: 2, b: "here's a string", c: null }),
     }),
   () =>
-    benchmark('/patch', {
-      method: 'PATCH',
-      body: JSON.stringify({ a: 2, b: 'here\'s a string', c: null }),
+    benchmark("/patch", {
+      method: "PATCH",
+      body: JSON.stringify({ a: 2, b: "here's a string", c: null }),
     }),
   () =>
-    benchmark('/put', {
-      method: 'PUT',
-      body: JSON.stringify({ a: 2, b: 'here\'s a string', c: null }),
+    benchmark("/put", {
+      method: "PUT",
+      body: JSON.stringify({ a: 2, b: "here's a string", c: null }),
     }),
   () =>
-    benchmark('/delete', {
-      method: 'DELETE',
-      body: JSON.stringify({ a: 2, b: 'here\'s a string', c: null }),
+    benchmark("/delete", {
+      method: "DELETE",
+      body: JSON.stringify({ a: 2, b: "here's a string", c: null }),
     }),
   () =>
     benchmark(basicAuthEndpoint, {
@@ -150,11 +192,11 @@ const results = await pSeries([
     }),
   () =>
     benchmark(basicAuthEndpoint, {
-      headers: { 'Authorization': `Basic ${btoa('hello:world')}` },
+      headers: { "Authorization": `Basic ${btoa("hello:world")}` },
     }),
   () =>
     benchmark(basicAuthEndpoint, {
-      headers: { 'Authorization': `Basic ${btoa('no:good')}` },
+      headers: { "Authorization": `Basic ${btoa("no:good")}` },
       expectError: 401,
     }),
   () =>
@@ -163,27 +205,61 @@ const results = await pSeries([
     }),
   () =>
     benchmark(bearerAuthEndpoint, {
-      headers: { 'Authorization': 'Bearer asdfghjkl' },
+      headers: { "Authorization": "Bearer asdfghjkl" },
     }),
-
   () =>
-    benchmark('/status/403', {
+    benchmark("/status/403", {
       expectError: 403,
     }),
   () =>
-    benchmark('/status/500', {
+    benchmark("/status/500", {
       expectError: 500,
     }),
-  () => benchmark('/status/203'),
+  () => benchmark("/status/203"),
   () =>
-    benchmark('/status/304', {
+    benchmark("/status/304", {
       expectError: 304,
     }),
   () =>
     benchmark({
-      deno: `/redirect?to=${encodeURIComponent('https://deno.land/')}`,
-      classic: `/redirect-to?url=${encodeURIComponent('https://deno.land/')}`,
+      deno: `/redirect?to=${encodeURIComponent("https://deno.land/")}`,
+      python: `/redirect-to?url=${encodeURIComponent("https://deno.land/")}`,
     }),
 ]);
 
-await Deno.writeTextFile('benchmark.results.json', JSON.stringify(results));
+await Deno.stdout.write(new TextEncoder().encode("\n"));
+
+const denoSummary = results.map((k) => k.denoTime);
+const pythonSummary = results.map((k) => k.pythonTime);
+
+console.group(blue(bold("Deno:")));
+console.log(
+  "average: ",
+  (denoSummary.reduce((prev, cur) => (prev + cur)) /
+    denoSummary.length).toFixed(2) + "ms",
+);
+console.log(
+  "min: ",
+  Math.min(...denoSummary).toFixed(2) + "ms",
+);
+console.log(
+  "max: ",
+  Math.max(...denoSummary).toFixed(2) + "ms",
+);
+console.groupEnd();
+
+console.group(green(bold("Python:")));
+console.log(
+  "average: ",
+  (pythonSummary.reduce((prev, cur) => (prev + cur)) /
+    pythonSummary.length).toFixed(2) + "ms",
+);
+console.log(
+  "min: ",
+  Math.min(...pythonSummary).toFixed(2) + "ms",
+);
+console.log(
+  "max: ",
+  Math.max(...pythonSummary).toFixed(2) + "ms",
+);
+console.groupEnd();
