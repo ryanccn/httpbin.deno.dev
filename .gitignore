@@ -2,3 +2,6 @@
 .localized
 
 /benchmark.results.json
+
+.vscode/
+.idea/

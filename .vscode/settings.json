@@ -1,9 +1,0 @@
-{
-  "deno.enable": true,
-  "deno.lint": true,
-  "deno.unstable": false,
-  "deno.config": "./deno.jsonc",
-  "[javascript][typescript][json][jsonc]": {
-    "editor.defaultFormatter": "denoland.vscode-deno"
-  }
-}
