@@ -1,19 +1,20 @@
 import pSeries from "npm:p-series";
 import {
-	bgBlue,
-	bgGreen,
-	bgWhite,
 	blue,
 	bold,
+	dim,
 	green,
+	magenta,
 } from "https://deno.land/std@0.190.0/fmt/colors.ts";
 
 const DENO_ROOT = "https://httpbin.deno.dev";
 const PYTHON_ROOT = "https://pie.dev";
+const GO_ROOT = "https://httpbun.org";
 
 type BenchmarkEndpoint = string | {
 	deno: string;
 	python: string;
+	go: string;
 };
 interface BenchmarkOptions {
 	/** The method of the `fetch` request */
@@ -30,6 +31,7 @@ interface BenchmarkResults {
 	endpoint: BenchmarkEndpoint;
 	denoTime: number;
 	pythonTime: number;
+	goTime: number;
 }
 
 /** Time a request */
@@ -39,6 +41,7 @@ const timeRequest = async (url: string, options: BenchmarkOptions) => {
 		body: options.body,
 		method: options.method,
 		headers: options.headers,
+		redirect: "manual",
 	});
 	const beta = performance.now();
 
@@ -52,30 +55,37 @@ const timeRequest = async (url: string, options: BenchmarkOptions) => {
 };
 
 const ITERATIONS = 10;
-const PROGRESS_BAR_WIDTH = 25;
+const PROGRESS_BAR_WIDTH = 30;
 
 /** Progress bar */
 const barFactory = async (
-	opts: { url: string; i: number; type: "deno" | "python" },
+	opts: { url: string; i: number; type: "deno" | "python" | "go" },
 ) => {
 	const filledLength = Math.floor(opts.i / ITERATIONS * PROGRESS_BAR_WIDTH);
 	const emptyLength = PROGRESS_BAR_WIDTH - filledLength;
 
-	const fg = opts.type === "deno" ? blue : green;
-	const bg = opts.type === "deno" ? bgBlue : bgGreen;
-
-	const pathname =
-		new URL(opts.url, opts.type === "deno" ? DENO_ROOT : PYTHON_ROOT).pathname;
+	const fg = opts.type === "deno"
+		? blue
+		: opts.type === "python"
+		? green
+		: magenta;
 
 	const bar = "" +
 		"\x1B[2K\x1B[0G" +
 		"\u001b[1F\x1B[2K\x1B[0G" +
-		(opts.type === "deno" ? "🦕" : "🐍") +
-		pathname +
+		fg(
+			opts.type === "deno"
+				? DENO_ROOT
+				: opts.type === "python"
+				? PYTHON_ROOT
+				: GO_ROOT,
+		) +
+		opts.url +
 		"\n" +
-		bg(fg("=").repeat(filledLength)) +
-		bgWhite(" ".repeat(emptyLength)) +
-		"  " +
+		dim("[") +
+		fg("=").repeat(filledLength) +
+		" ".repeat(emptyLength) +
+		dim("] ") +
 		`${opts.i}/${ITERATIONS}`;
 
 	await Deno.stdout.write(new TextEncoder().encode(bar));
@@ -83,7 +93,7 @@ const barFactory = async (
 
 /** Repeat an async function for many times and take the average of the numbers */
 const measure = async (
-	info: { url: string; type: "deno" | "python" },
+	info: { url: string; type: "deno" | "python" | "go" },
 	promiseFactory: () => Promise<number>,
 ) => {
 	let i = 0;
@@ -113,19 +123,16 @@ const benchmark = async (
 ): Promise<BenchmarkResults> => {
 	let denoEndpoint: string;
 	let pythonEndpoint: string;
+	let goEndpoint: string;
 
 	if (typeof endpoint === "string") {
-		denoEndpoint = pythonEndpoint = endpoint;
+		denoEndpoint = pythonEndpoint = goEndpoint = endpoint;
 	} else {
 		denoEndpoint = endpoint.deno;
 		pythonEndpoint = endpoint.python;
+		goEndpoint = endpoint.go;
 	}
 
-	// const denoTime = await timeRequest(DENO_ROOT + denoEndpoint, options);
-	// const pythonTime = await timeRequest(
-	//   PYTHON_ROOT + pythonEndpoint,
-	//   options,
-	// );
 	const denoTime = await measure(
 		{ url: denoEndpoint, type: "deno" },
 		() => timeRequest(DENO_ROOT + denoEndpoint, options),
@@ -138,8 +145,16 @@ const benchmark = async (
 			PYTHON_ROOT + pythonEndpoint,
 			options,
 		));
+	const goTime = await measure({
+		url: goEndpoint,
+		type: "go",
+	}, () =>
+		timeRequest(
+			GO_ROOT + pythonEndpoint,
+			options,
+		));
 
-	return { endpoint, denoTime, pythonTime };
+	return { endpoint, denoTime, pythonTime, goTime };
 };
 
 /**
@@ -149,11 +164,13 @@ const benchmark = async (
 const basicAuthEndpoint: BenchmarkEndpoint = {
 	deno: "/auth/basic/hello/world",
 	python: "/basic-auth/hello/world",
+	go: "/basic-auth/hello/world",
 };
 
 const bearerAuthEndpoint: BenchmarkEndpoint = {
 	deno: "/auth/bearer",
 	python: "/bearer",
+	go: "/bearer",
 };
 
 await Deno.stdout.write(new TextEncoder().encode("\n"));
@@ -224,42 +241,60 @@ const results = await pSeries([
 		benchmark({
 			deno: `/redirect?to=${encodeURIComponent("https://deno.land/")}`,
 			python: `/redirect-to?url=${encodeURIComponent("https://deno.land/")}`,
-		}),
+			go: `/redirect-to?url=${encodeURIComponent("https://deno.land/")}`,
+		}, { expectError: 302 }),
 ]);
 
 await Deno.stdout.write(new TextEncoder().encode("\n"));
 
 const denoSummary = results.map((k) => k.denoTime);
 const pythonSummary = results.map((k) => k.pythonTime);
+const goSummary = results.map((k) => k.goTime);
 
 console.group(blue(bold("Deno:")));
 console.log(
-	"average: ",
+	"average:",
 	(denoSummary.reduce((prev, cur) => (prev + cur)) /
 		denoSummary.length).toFixed(2) + "ms",
 );
 console.log(
-	"min: ",
+	"min:",
 	Math.min(...denoSummary).toFixed(2) + "ms",
 );
 console.log(
-	"max: ",
+	"max:",
 	Math.max(...denoSummary).toFixed(2) + "ms",
 );
 console.groupEnd();
 
 console.group(green(bold("Python:")));
 console.log(
-	"average: ",
+	"average:",
 	(pythonSummary.reduce((prev, cur) => (prev + cur)) /
 		pythonSummary.length).toFixed(2) + "ms",
 );
 console.log(
-	"min: ",
+	"min:",
 	Math.min(...pythonSummary).toFixed(2) + "ms",
 );
 console.log(
-	"max: ",
+	"max:",
 	Math.max(...pythonSummary).toFixed(2) + "ms",
+);
+console.groupEnd();
+
+console.group(magenta(bold("Go:")));
+console.log(
+	"average:",
+	(goSummary.reduce((prev, cur) => (prev + cur)) /
+		goSummary.length).toFixed(2) + "ms",
+);
+console.log(
+	"min:",
+	Math.min(...goSummary).toFixed(2) + "ms",
+);
+console.log(
+	"max:",
+	Math.max(...goSummary).toFixed(2) + "ms",
 );
 console.groupEnd();
